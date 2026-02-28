@@ -154,7 +154,7 @@ This is an automated report from Clock Slayer.
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        from: 'Clock Slayer <clockslayer@thedustybutter.com>',
+        from: 'Clock Slayer <onboarding@resend.dev>',
         to: ['eblaser44@gmail.com'],
         subject: `Clock Slayer Weekly Report - ${dateRange}`,
         text: emailBody,
