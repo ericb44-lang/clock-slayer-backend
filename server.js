@@ -2,7 +2,6 @@
 const express = require('express');
 const cors = require('cors');
 const cron = require('node-cron');
-const nodemailer = require('nodemailer');
 const { createObjectCsvStringifier } = require('csv-writer');
 const { Sequelize, DataTypes } = require('sequelize');
 require('dotenv').config();
@@ -14,7 +13,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Database setup (SQLite for simplicity, can switch to PostgreSQL for production)
+// Database setup
 const sequelize = new Sequelize({
   dialect: 'sqlite',
   storage: './clockslayer.db',
@@ -46,21 +45,11 @@ const MileageEntry = sequelize.define('MileageEntry', {
   notes: { type: DataTypes.TEXT }
 });
 
-// Email configuration
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER, // Your Gmail address
-    pass: process.env.EMAIL_APP_PASSWORD // Gmail App Password (not regular password)
-  }
-});
-
 // Generate CSV from time entries
 async function generateWeeklyCSV() {
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
   
-  // Get all time entries from the last 7 days
   const timeEntries = await TimeEntry.findAll({
     where: {
       startTime: {
@@ -70,7 +59,6 @@ async function generateWeeklyCSV() {
     order: [['startTime', 'ASC']]
   });
 
-  // Get all mileage entries from the last 7 days
   const mileageEntries = await MileageEntry.findAll({
     where: {
       date: {
@@ -79,12 +67,10 @@ async function generateWeeklyCSV() {
     }
   });
 
-  // Get all projects
   const projects = await Project.findAll();
   const projectMap = {};
   projects.forEach(p => projectMap[p.id] = p.name);
 
-  // Create mileage lookup by project and date
   const mileageByProjectDate = {};
   mileageEntries.forEach(me => {
     const key = `${me.projectId}_${me.date}`;
@@ -94,7 +80,6 @@ async function generateWeeklyCSV() {
     mileageByProjectDate[key] += parseFloat(me.miles);
   });
 
-  // Format data for CSV
   const csvData = timeEntries.map(entry => {
     const startDate = new Date(entry.startTime);
     const endDate = new Date(entry.endTime);
@@ -112,7 +97,6 @@ async function generateWeeklyCSV() {
     };
   });
 
-  // Create CSV string
   const csvStringifier = createObjectCsvStringifier({
     header: [
       { id: 'date', title: 'Date' },
@@ -135,7 +119,7 @@ async function generateWeeklyCSV() {
   };
 }
 
-// Send weekly email
+// Send weekly email using Resend API
 async function sendWeeklyEmail() {
   try {
     console.log('Generating weekly report...');
@@ -161,39 +145,48 @@ Please see the attached CSV file for detailed breakdown.
 This is an automated report from Clock Slayer.
     `.trim();
 
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: 'eblaser44@gmail.com',
-      subject: `Clock Slayer Weekly Report - ${dateRange}`,
-      text: emailBody,
-      attachments: [
-        {
-          filename: `clock-slayer-${startDate.toISOString().split('T')[0]}_to_${endDate.toISOString().split('T')[0]}.csv`,
-          content: csvContent
-        }
-      ]
-    };
+    const csvBase64 = Buffer.from(csvContent).toString('base64');
 
-    await transporter.sendMail(mailOptions);
-    console.log('Weekly report sent successfully!');
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: 'Clock Slayer <clockslayer@thedustybutter.com>',
+        to: ['eblaser44@gmail.com'],
+        subject: `Clock Slayer Weekly Report - ${dateRange}`,
+        text: emailBody,
+        attachments: [
+          {
+            filename: `clock-slayer-${startDate.toISOString().split('T')[0]}_to_${endDate.toISOString().split('T')[0]}.csv`,
+            content: csvBase64
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Resend API error: ${error}`);
+    }
+
+    const result = await response.json();
+    console.log('Weekly report sent successfully!', result);
   } catch (error) {
     console.error('Error sending weekly email:', error);
   }
 }
 
-// Schedule weekly email - Every Friday at 8:44 PM
-// Cron format: minute hour day-of-month month day-of-week
-// 44 20 * * 5 = 8:44 PM (20:44) every Friday (5)
 cron.schedule('44 20 * * 5', () => {
   console.log('Running scheduled weekly email task...');
   sendWeeklyEmail();
 }, {
-  timezone: "America/Denver" // Mountain Time - adjust to your timezone
+  timezone: "America/Denver"
 });
 
 // API Routes
-
-// Projects
 app.get('/api/projects', async (req, res) => {
   try {
     const projects = await Project.findAll();
@@ -231,7 +224,6 @@ app.delete('/api/projects/:id', async (req, res) => {
   }
 });
 
-// Time Entries
 app.get('/api/time-entries', async (req, res) => {
   try {
     const entries = await TimeEntry.findAll({ order: [['startTime', 'DESC']] });
@@ -269,7 +261,6 @@ app.delete('/api/time-entries/:id', async (req, res) => {
   }
 });
 
-// Mileage Entries
 app.get('/api/mileage-entries', async (req, res) => {
   try {
     const entries = await MileageEntry.findAll({ order: [['date', 'DESC']] });
@@ -307,7 +298,6 @@ app.delete('/api/mileage-entries/:id', async (req, res) => {
   }
 });
 
-// Test email endpoint (for testing without waiting for Friday)
 app.post('/api/test-email', async (req, res) => {
   try {
     await sendWeeklyEmail();
@@ -317,12 +307,10 @@ app.post('/api/test-email', async (req, res) => {
   }
 });
 
-// Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Initialize database and start server
 async function startServer() {
   try {
     await sequelize.sync();
