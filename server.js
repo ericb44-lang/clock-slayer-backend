@@ -119,7 +119,7 @@ async function generateWeeklyCSV() {
   };
 }
 
-// Send weekly email using Resend API
+// Send weekly email using Brevo API
 async function sendWeeklyEmail() {
   try {
     console.log('Generating weekly report...');
@@ -147,20 +147,21 @@ This is an automated report from Clock Slayer.
 
     const csvBase64 = Buffer.from(csvContent).toString('base64');
 
-    const response = await fetch('https://api.resend.com/emails', {
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json'
+        'accept': 'application/json',
+        'api-key': process.env.BREVO_API_KEY,
+        'content-type': 'application/json'
       },
       body: JSON.stringify({
-        from: 'Clock Slayer <clockslayer@thedustybutter.com>',
-        to: ['eblaser44@gmail.com'],
+        sender: { name: 'Clock Slayer', email: 'clockslayer@thedustybutter.com' },
+        to: [{ email: 'eblaser44@gmail.com', name: 'Eric' }],
         subject: `Clock Slayer Weekly Report - ${dateRange}`,
-        text: emailBody,
-        attachments: [
+        textContent: emailBody,
+        attachment: [
           {
-            filename: `clock-slayer-${startDate.toISOString().split('T')[0]}_to_${endDate.toISOString().split('T')[0]}.csv`,
+            name: `clock-slayer-${startDate.toISOString().split('T')[0]}_to_${endDate.toISOString().split('T')[0]}.csv`,
             content: csvBase64
           }
         ]
@@ -169,7 +170,7 @@ This is an automated report from Clock Slayer.
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Resend API error: ${error}`);
+      throw new Error(`Brevo API error: ${error}`);
     }
 
     const result = await response.json();
